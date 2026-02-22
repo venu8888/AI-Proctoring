@@ -14,7 +14,7 @@ interface PairingContextType {
   pairingState: MobilePairingState
   qrData: QRPairingData | null
   isPaired: boolean
-  generateQRCode: () => QRPairingData
+  generateQRCode: () => QRPairingData | null
   confirmPairing: (deviceId: string) => void
   resetPairing: () => void
   updateHeartbeat: () => void
@@ -43,9 +43,10 @@ export function PairingProvider({ children }: PairingProviderProps) {
 
 
   // Generate QR code data for mobile pairing
-  const generateQRCode = useCallback((): QRPairingData => {
+  const generateQRCode = useCallback((): QRPairingData | null => {
     if (!session) {
-      throw new Error("No active session")
+      console.warn("No active session to generate QR code for")
+      return null
     }
 
     const now = Date.now()

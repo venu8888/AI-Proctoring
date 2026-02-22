@@ -30,7 +30,7 @@ import { Shield, Camera, Monitor, Loader2, Play, LogOut, Info } from "lucide-rea
 
 export default function ExamSetupPage() {
   const router = useRouter()
-  const { isAuthenticated, isLoading: authLoading, student, logout } = useAuth()
+  const { isAuthenticated, isLoading: authLoading, student, logout, user } = useAuth()
   const { initializeExam, examState } = useExam()
   const {
     hasWebcamPermission,
@@ -48,12 +48,16 @@ export default function ExamSetupPage() {
   const [localScreenError, setLocalScreenError] = useState("")
   const [isStarting, setIsStarting] = useState(false)
 
-  // Redirect if not authenticated
+  // Redirect if not authenticated or not a student
   useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
-      router.replace("/")
+    if (!authLoading) {
+      if (!isAuthenticated) {
+        router.replace("/")
+      } else if (user && user.role !== 'student') {
+        router.replace("/admin")
+      }
     }
-  }, [isAuthenticated, authLoading, router])
+  }, [isAuthenticated, authLoading, user, router])
 
   // Redirect to exam if already started
   useEffect(() => {

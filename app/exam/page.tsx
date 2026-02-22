@@ -16,16 +16,20 @@ import { LiveStreamBroadcaster } from "@/components/exam/live-stream-broadcaster
 
 export default function ExamPage() {
   const router = useRouter()
-  const { isAuthenticated, isLoading: authLoading, logout } = useAuth()
+  const { isAuthenticated, isLoading: authLoading, logout, user } = useAuth()
   const { examState, isExamActive } = useExam()
   const [showResults, setShowResults] = useState(false)
 
-  // Redirect if not authenticated
+  // Redirect if not authenticated or not a student
   useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
-      router.replace("/")
+    if (!authLoading) {
+      if (!isAuthenticated) {
+        router.replace("/")
+      } else if (user && user.role !== 'student') {
+        router.replace("/admin")
+      }
     }
-  }, [isAuthenticated, authLoading, router])
+  }, [isAuthenticated, authLoading, user, router])
 
   // Redirect to setup if exam not initialized
   useEffect(() => {
