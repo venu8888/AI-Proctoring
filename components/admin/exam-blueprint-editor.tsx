@@ -51,6 +51,8 @@ export function ExamBlueprintEditor() {
     // Data for selects
     const [groups, setGroups] = useState<Group[]>([])
     const [selectedGroupId, setSelectedGroupId] = useState<string>("")
+    const [banks, setBanks] = useState<any[]>([])
+    const [selectedBankId, setSelectedBankId] = useState<string>("")
     const [availableTopics, setAvailableTopics] = useState<string[]>([])
     const [topicStats, setTopicStats] = useState<TopicStats[]>([])
 
@@ -61,6 +63,16 @@ export function ExamBlueprintEditor() {
         fetchInitialData()
     }, [])
 
+    useEffect(() => {
+        if (selectedBankId) {
+            fetchTopicStatsForBank(selectedBankId)
+        } else {
+            setTopicStats([])
+            setAvailableTopics([])
+            setRules([]) // clear rules if bank changes
+        }
+    }, [selectedBankId])
+
     const fetchInitialData = async () => {
         setIsLoading(true)
         try {
@@ -68,8 +80,25 @@ export function ExamBlueprintEditor() {
             const { data: groupsData } = await supabase.from('groups').select('id, name')
             if (groupsData) setGroups(groupsData)
 
-            // 2. Fetch question stats to know what topics/difficulties exist
-            const { data: questionsData } = await supabase.from('questions').select('topic, difficulty')
+            // 2. Fetch available question banks
+            const { getQuestionBanks } = await import('@/services/question-service')
+            const banksData = await getQuestionBanks()
+            if (banksData) setBanks(banksData)
+
+        } catch (e) {
+            console.error(e)
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    const fetchTopicStatsForBank = async (bankId: string) => {
+        try {
+            // Fetch question stats for the selected bank
+            const { data: questionsData } = await supabase
+                .from('questions')
+                .select('topic, difficulty')
+                .eq('bank_id', bankId)
 
             if (questionsData) {
                 // Calculate counts
@@ -124,8 +153,8 @@ export function ExamBlueprintEditor() {
         0)
 
     const handleCreateBlueprint = async () => {
-        if (!title || !startTime || !endTime || !selectedGroupId) {
-            toast.error("Please fill in all general settings")
+        if (!title || !startTime || !endTime || !selectedGroupId || !selectedBankId) {
+            toast.error("Please fill in all general settings including a Question Bank")
             return
         }
         if (rules.length === 0) {
@@ -230,6 +259,20 @@ export function ExamBlueprintEditor() {
                             <SelectContent>
                                 {groups.map(g => (
                                     <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label>Select Question Bank</Label>
+                        <Select value={selectedBankId} onValueChange={setSelectedBankId}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Select Question Bank" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {banks.map(b => (
+                                    <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
@@ -343,7 +386,7 @@ export function ExamBlueprintEditor() {
 
                         {rules.length === 0 && (
                             <div className="text-center py-8 text-muted-foreground text-sm border-2 border-dashed rounded-lg">
-                                No blueprint rules defined yet. Click "Add Topic Rule" to configure the exam content.
+                                {!selectedBankId ? "Please select a Question Bank above first." : "No blueprint rules defined yet. Click 'Add Topic Rule' to configure the exam content."}
                             </div>
                         )}
                     </div>

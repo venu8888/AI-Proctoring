@@ -33,6 +33,7 @@ export interface Question {
   correctAnswer: number // Index of correct option
   difficulty: Difficulty
   minimumExpectedTime: number // in seconds
+  bankId?: string
 }
 
 export interface Answer {

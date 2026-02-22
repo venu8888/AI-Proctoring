@@ -5,9 +5,10 @@ import type { Question } from "@/types"
  * Manages question loading and dynamic updates via Server API
  */
 
-export async function getQuestions(): Promise<Question[]> {
+export async function getQuestions(bankId?: string): Promise<Question[]> {
   try {
-    const res = await fetch('/api/admin/questions', { cache: 'no-store' });
+    const url = bankId ? `/api/admin/questions?bankId=${bankId}` : '/api/admin/questions';
+    const res = await fetch(url, { cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
       return data.questions;
@@ -16,6 +17,40 @@ export async function getQuestions(): Promise<Question[]> {
     console.error("Failed to fetch questions", e);
   }
   return [];
+}
+
+export async function getQuestionBanks(): Promise<any[]> {
+  try {
+    const res = await fetch('/api/admin/questions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'get_banks' })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.banks || [];
+    }
+  } catch (e) {
+    console.error("Failed to fetch banks", e);
+  }
+  return [];
+}
+
+export async function createQuestionBank(bankName: string, createdBy: string): Promise<any> {
+  try {
+    const res = await fetch('/api/admin/questions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create_bank', bankName, createdBy })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.bank;
+    }
+  } catch (e) {
+    console.error("Failed to create bank", e);
+  }
+  return null;
 }
 
 export async function getQuestionVersion(): Promise<number> {

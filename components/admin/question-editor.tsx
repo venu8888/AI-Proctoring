@@ -10,7 +10,8 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { Edit2, Plus, RefreshCw, Check, X } from "lucide-react"
+import { Edit2, Plus, RefreshCw, Check, X, FolderPlus } from "lucide-react"
+import { useAuth } from "@/contexts/auth-context"
 
 /**
  * Question Editor Component (Admin)
@@ -19,18 +20,44 @@ import { Edit2, Plus, RefreshCw, Check, X } from "lucide-react"
  */
 
 export function QuestionEditor() {
+  const { user } = useAuth()
   const [questions, setQuestions] = useState<Question[]>([])
+  const [banks, setBanks] = useState<any[]>([])
+  const [selectedBankId, setSelectedBankId] = useState<string>("")
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<Partial<Question>>({})
   const [isAddingNew, setIsAddingNew] = useState(false)
 
-  // Load questions on mount
+  // New Bank form state
+  const [isAddingBank, setIsAddingBank] = useState(false)
+  const [newBankName, setNewBankName] = useState("")
+
+  // Load banks on mount
   useEffect(() => {
-    loadQuestions()
+    loadBanks()
   }, [])
 
-  const loadQuestions = async () => {
-    const data = await getQuestions()
+  // Load questions when selected bank changes
+  useEffect(() => {
+    if (selectedBankId) {
+      loadQuestions(selectedBankId)
+    } else {
+      setQuestions([])
+    }
+  }, [selectedBankId])
+
+  const loadBanks = async () => {
+    // Requires importing getQuestionBanks
+    const { getQuestionBanks } = await import("@/services/question-service")
+    const data = await getQuestionBanks()
+    setBanks(data)
+    if (data.length > 0 && !selectedBankId) {
+      setSelectedBankId(data[0].id)
+    }
+  }
+
+  const loadQuestions = async (bankId: string) => {
+    const data = await getQuestions(bankId)
     setQuestions(data)
   }
 
@@ -48,9 +75,9 @@ export function QuestionEditor() {
   const handleSave = async () => {
     if (!editingId || !editForm.questionId) return
 
-    const success = await updateQuestion(editingId, editForm)
+    const success = await updateQuestion(editingId, { ...editForm, bankId: selectedBankId })
     if (success) {
-      await loadQuestions()
+      await loadQuestions(selectedBankId)
       setEditingId(null)
       setEditForm({})
     }
@@ -63,6 +90,8 @@ export function QuestionEditor() {
   }
 
   const handleAddNew = async () => {
+    if (!selectedBankId) return
+
     const newQuestion: any = {
       questionId: `q${Date.now()}`,
       question: editForm.question || "",
@@ -71,46 +100,96 @@ export function QuestionEditor() {
       difficulty: (editForm.difficulty as Difficulty) || "medium",
       minimumExpectedTime: editForm.minimumExpectedTime || 30,
       topic: (editForm as any).topic || "General",
+      bankId: selectedBankId
     }
 
     await addQuestion(newQuestion)
-    await loadQuestions()
+    await loadQuestions(selectedBankId)
     setIsAddingNew(false)
     setEditForm({})
   }
 
+  const handleCreateBank = async () => {
+    if (!newBankName.trim() || !user?.id) return
+    const { createQuestionBank } = await import("@/services/question-service")
+    const newBank = await createQuestionBank(newBankName, user.id)
+    if (newBank) {
+      await loadBanks()
+      setSelectedBankId(newBank.id)
+      setIsAddingBank(false)
+      setNewBankName("")
+    }
+  }
+
   const handleReset = async () => {
     await resetQuestionBank()
-    await loadQuestions()
+    if (selectedBankId) {
+      await loadQuestions(selectedBankId)
+    }
   }
 
 
 
   return (
     <Card className="border-border/50 bg-card/80">
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-base">Question Management</CardTitle>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setIsAddingNew(true)
-              setEditForm({
-                options: ["", "", "", ""],
-                correctAnswer: 0,
-                difficulty: "medium",
-                minimumExpectedTime: 30,
-              })
-            }}
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Add Question
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleReset}>
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Reset
-          </Button>
+      <CardHeader className="flex flex-col gap-4">
+        <div className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">Question Management</CardTitle>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsAddingBank(!isAddingBank)}
+            >
+              <FolderPlus className="mr-2 h-4 w-4" />
+              New Bank
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!selectedBankId}
+              onClick={() => {
+                setIsAddingNew(true)
+                setEditForm({
+                  options: ["", "", "", ""],
+                  correctAnswer: 0,
+                  difficulty: "medium",
+                  minimumExpectedTime: 30,
+                })
+              }}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Add Question
+            </Button>
+          </div>
+        </div>
+
+        {/* Bank Selection */}
+        <div className="flex items-center gap-4">
+          <div className="flex-1 max-w-sm">
+            <Select value={selectedBankId} onValueChange={setSelectedBankId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a Question Bank" />
+              </SelectTrigger>
+              <SelectContent>
+                {banks.map(bank => (
+                  <SelectItem key={bank.id} value={bank.id}>{bank.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {isAddingBank && (
+            <div className="flex items-center gap-2 flex-1">
+              <Input
+                value={newBankName}
+                onChange={(e) => setNewBankName(e.target.value)}
+                placeholder="Enter new bank name..."
+                className="max-w-xs"
+              />
+              <Button size="sm" onClick={handleCreateBank}>Create</Button>
+              <Button size="sm" variant="ghost" onClick={() => setIsAddingBank(false)}><X className="h-4 w-4" /></Button>
+            </div>
+          )}
         </div>
       </CardHeader>
       <CardContent className="space-y-4">

@@ -5,12 +5,21 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
 
-export async function GET() {
+export async function GET(req: Request) {
     try {
-        const { data: questions, error } = await supabaseAdmin
+        const url = new URL(req.url)
+        const bankId = url.searchParams.get('bankId')
+
+        let query = supabaseAdmin
             .from('questions')
             .select('*')
             .order('created_at', { ascending: false })
+
+        if (bankId) {
+            query = query.eq('bank_id', bankId)
+        }
+
+        const { data: questions, error } = await query
 
         if (error) throw error
 
@@ -22,7 +31,8 @@ export async function GET() {
             correctAnswer: q.correct_answer,
             difficulty: q.difficulty,
             minimumExpectedTime: 30, // Mock for now or add to schema
-            topic: q.topic
+            topic: q.topic,
+            bankId: q.bank_id
         }))
 
         return NextResponse.json({
@@ -38,15 +48,29 @@ export async function GET() {
 export async function POST(req: Request) {
     try {
         const body = await req.json()
-        const { action, question, questionId, updates } = body
+        const { action, question, questionId, updates, bankName, createdBy } = body
 
-        if (action === 'add') {
+        if (action === 'get_banks') {
+            const { data, error } = await supabaseAdmin.from('question_banks').select('*').order('created_at', { ascending: false })
+            if (error) throw error
+            return NextResponse.json({ banks: data })
+        }
+        else if (action === 'create_bank') {
+            const { data, error } = await supabaseAdmin.from('question_banks').insert({
+                name: bankName,
+                created_by: createdBy
+            }).select().single()
+            if (error) throw error
+            return NextResponse.json({ bank: data })
+        }
+        else if (action === 'add') {
             const { error } = await supabaseAdmin.from('questions').insert({
                 topic: question.topic || 'General', // Fallback
                 difficulty: question.difficulty,
                 text: question.question,
                 options: question.options,
-                correct_answer: question.correctAnswer
+                correct_answer: question.correctAnswer,
+                bank_id: question.bankId
             })
             if (error) throw error
         }
@@ -58,7 +82,8 @@ export async function POST(req: Request) {
                     difficulty: updates.difficulty,
                     text: updates.question,
                     options: updates.options,
-                    correct_answer: updates.correctAnswer
+                    correct_answer: updates.correctAnswer,
+                    bank_id: updates.bankId
                 })
                 .match({ id: questionId })
             if (error) throw error
