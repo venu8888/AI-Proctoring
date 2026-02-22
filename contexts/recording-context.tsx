@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState, useCallback, useRef, type ReactNode } from "react"
+import { createContext, useContext, useState, useCallback, useRef, useEffect, type ReactNode } from "react"
 import type { RecordingState } from "@/types"
 
 /**
@@ -50,6 +50,53 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const animationFrameRef = useRef<number | null>(null)
   const recordedChunksRef = useRef<Blob[]>([])
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null)
+
+  // WebRTC Signaling Logic
+  const setupWebRTC = useCallback(async (socket: any, targetSessionId: string) => {
+    if (peerConnectionRef.current) {
+      // Already active? maybe renegotiate or ignore
+      // For simplicity, close and recreate or reuse
+      return;
+    }
+
+    console.log("Setting up WebRTC Peer Connection");
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    });
+    peerConnectionRef.current = pc;
+
+    // Add Tracks
+    const { webcamStream, screenStream } = recordingState;
+    if (webcamStream) {
+      webcamStream.getTracks().forEach(track => pc.addTrack(track, webcamStream));
+    }
+    if (screenStream) {
+      screenStream.getTracks().forEach(track => pc.addTrack(track, screenStream));
+    }
+
+    // ICE Candidates
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit('ice-candidate', {
+          targetSessionId,
+          candidate: event.candidate
+        });
+      }
+    };
+
+    // Create Offer
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    socket.emit('offer', {
+      targetSessionId,
+      sdp: offer
+    });
+  }, [recordingState]);
+
+  // Removed WebRTC signaling useEffect
+
 
   // Request webcam permission and get stream
   const requestWebcamPermission = useCallback(async (): Promise<boolean> => {

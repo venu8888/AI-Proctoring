@@ -16,7 +16,7 @@ export default function HomePage() {
       <div className="relative flex min-h-screen flex-col items-center justify-center px-4 py-12">
         {/* Header */}
         <div className="mb-8 text-center">
-          <h1 className="text-4xl font-bold tracking-tight text-foreground sm:text-5xl">AI Proctor</h1>
+          <h1 className="text-4xl font-bold tracking-tight text-foreground sm:text-5xl">TRINETRA</h1>
           <p className="mt-3 text-lg text-muted-foreground">Secure & Intelligent Examination System</p>
         </div>
 

@@ -153,7 +153,7 @@ export function SessionDetailModal({ session, open, onOpenChange, onTerminate }:
                         <Badge variant="outline" className={getSeverityColor(flag.severity)}>
                           {flag.severity.toUpperCase()}
                         </Badge>
-                        <span className="text-xs text-muted-foreground">{formatTime(flag.timestamp)}</span>
+                        <span className="text-xs text-muted-foreground">{formatTime(new Date(flag.timestamp).getTime())}</span>
                       </div>
                       <p className="font-medium text-sm">{flag.type.replace(/_/g, " ")}</p>
                       <p className="text-sm text-muted-foreground">{flag.description}</p>
@@ -167,7 +167,7 @@ export function SessionDetailModal({ session, open, onOpenChange, onTerminate }:
           <TabsContent value="activity" className="mt-4">
             <ScrollArea className="h-[300px] pr-4">
               <div className="space-y-2">
-                {session.activityLog.map((log, index) => (
+                {(session.activityLog || []).map((log, index) => (
                   <div key={index} className="flex items-start gap-3 rounded-lg border border-border p-3">
                     <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
                       <Clock className="h-4 w-4 text-muted-foreground" />

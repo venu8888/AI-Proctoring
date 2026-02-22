@@ -1,11 +1,13 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import type { StudentSession } from "@/types"
 import { X, Maximize2, Minimize2, Camera, Monitor, Smartphone, AlertTriangle, Loader2 } from "lucide-react"
+
+import { supabase } from "@/lib/supabaseClient"
 
 interface LiveVideoViewerProps {
   session: StudentSession
@@ -24,7 +26,7 @@ export function LiveVideoViewer({ session, onClose, onWarn }: LiveVideoViewerPro
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
 
   // Refs for WebRTC
-  const pcRef = useState<RTCPeerConnection | null>(null)
+  const pcRef = useRef<RTCPeerConnection | null>(null)
   const videoRef = useState<HTMLVideoElement | null>(null) // We use one video element for the merged stream or primary stream
 
   // We will assume MERGED stream for simplicity and robustness in this "existing codebase" constraint, 
@@ -39,91 +41,98 @@ export function LiveVideoViewer({ session, onClose, onWarn }: LiveVideoViewerPro
   const hasAlerts = session.behaviorFlags.some((f) => f.severity === "critical" || f.severity === "high")
 
   useEffect(() => {
-    let pc: RTCPeerConnection | null = null;
-    let mounted = true;
+    if (!session?.sessionId) return
 
-    const startWatching = async () => {
-      const { socket } = await import("@/lib/socket-client");
-      if (!socket.connected) socket.connect();
+    const roomName = `webrtc-${session.sessionId}`
+    const channel = supabase.channel(roomName)
 
-      pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-      });
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    })
 
-      // Handle incoming tracks
-      pc.ontrack = (event) => {
-        console.log("Received track:", event.track.kind);
-        // Simple heuristic: if we don't have webcam, this is webcam. If we have webcam, this is screen.
-        // Or rely on track.label if set by sender.
+    pcRef.current = pc
 
-        // For now, let's put the first video track into webcamStream (which shows in bottom right)
-        // and second into screenStream (main view).
-        // Actually usually Screen is the 'main' update.
+    pc.ontrack = (event) => {
+      // We expect 2 video tracks: one screen (usually higher res), one webcam
+      const stream = event.streams[0]
+      const videoTrack = event.track
 
-        // Let's create a new MediaStream for each track to attach to video elements
-        const newStream = new MediaStream([event.track]);
+      // Simple heuristic: if label contains 'screen' or 'monitor' or size is larger
+      // But MediaStreamTracks might not have reliable labels across browsers in a combined stream
+      // Since we are adding tracks individually on broadcaster, they might arrive as separate streams or one.
+      // Let's assume the first track is webcam and second is screen based on the addTrack order in broadcaster.
+      // A robust way mapping is usually done via M-lines or transceiver mid, but a simple state toggle works for demo.
 
-        // We need to differentiate. 
-        // We'll rely on the sender to add Screen first, then Webcam? Or metadata.
-        // Let's just put all into one stream and let the UI handle it? No, UI needs two srcObjects.
+      setWebcamStream(prev => {
+        if (!prev) return stream;
+        return prev;
+      })
 
-        // QUICK FIX: If we assume the sender sends separate streams, we get separate events.
-        // We'll update state based on what we have.
+      setScreenStream(prev => {
+        // If webcam is already set, this must be the second track (screen)
+        if (webcamStream) return stream;
+        return prev;
+      })
+    }
 
-        setScreenStream((prev) => {
-          if (!prev) return newStream; // First one is screen (assumption)
-          return prev;
-        });
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        channel.send({
+          type: 'broadcast',
+          event: 'webrtc-signal',
+          payload: {
+            target: 'broadcaster',
+            sender: 'admin',
+            signal: { type: 'candidate', candidate: event.candidate }
+          }
+        })
+      }
+    }
 
-        setWebcamStream((prev) => {
-          if (prev) return prev;
-          // If screen is already set (and this is different), set this as webcam.
-          // This logic is race-condition prone but suffice for a prototype "Fix".
-          // A better way is to check track settings or rely on transceiver order.
-          return newStream;
-        });
-      };
+    channel.on('broadcast', { event: 'webrtc-signal' }, async (payload) => {
+      const { target, sender, signal } = payload.payload
+      if (target !== 'admin') return
 
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          socket.emit('ice-candidate', {
-            targetSessionId: session.sessionId,
-            candidate: event.candidate
-          });
+      try {
+        if (signal.type === 'answer') {
+          await pc.setRemoteDescription(new RTCSessionDescription(signal.description))
+        } else if (signal.type === 'candidate') {
+          await pc.addIceCandidate(new RTCIceCandidate(signal.candidate))
         }
-      };
+      } catch (err) {
+        console.error("Admin WebRTC Error:", err)
+      }
+    })
 
-      // Socket listeners
-      socket.on('offer', async (data: any) => {
-        if (!pc) return;
-        await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        socket.emit('answer', {
-          targetSessionId: session.sessionId,
-          sdp: answer
-        });
-      });
+    channel.subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log(`Admin subscribed to ${roomName}`)
 
-      socket.on('ice-candidate', async (data: any) => {
-        if (pc && data.candidate) {
-          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-        }
-      });
+        // Create an offer to start the connection
+        pc.addTransceiver('video', { direction: 'recvonly' })
+        pc.addTransceiver('video', { direction: 'recvonly' }) // Two transceivers for two streams
 
-      // Request stream
-      socket.emit('request-stream', { targetSessionId: session.sessionId });
-    };
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
 
-    startWatching();
+        channel.send({
+          type: 'broadcast',
+          event: 'webrtc-signal',
+          payload: {
+            target: 'broadcaster',
+            sender: 'admin',
+            signal: { type: 'offer', description: pc.localDescription }
+          }
+        })
+      }
+    })
 
     return () => {
-      mounted = false;
-      if (pc) pc.close();
-      import("@/lib/socket-client").then(({ socket }) => {
-        socket.off('offer');
-        socket.off('ice-candidate');
-      });
+      pc.close()
+      supabase.removeChannel(channel)
     }
   }, [session.sessionId]);
 

@@ -44,6 +44,7 @@ export interface Answer {
 }
 
 export interface ExamState {
+  examId: string
   questions: Question[]
   answers: Answer[]
   currentQuestionIndex: number
@@ -52,6 +53,11 @@ export interface ExamState {
   totalDuration: number // in seconds
   remainingTime: number // in seconds
   isSubmitted: boolean
+  finalResult?: {
+    score: number
+    passing: boolean
+    credibilityIndex: number
+  }
 }
 
 // Logging and behavior analysis types
@@ -161,7 +167,7 @@ export interface StudentSession {
   examId: string
   studentId: string
   studentName: string
-  status: "active" | "paused" | "completed" | "terminated"
+  status: "active" | "paused" | "completed" | "terminated" | "pending"
   startTime: number
   timeRemaining: number
   currentQuestion: number

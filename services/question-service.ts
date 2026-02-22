@@ -72,3 +72,34 @@ export async function resetQuestionBank(): Promise<void> {
 // Deprecated but kept for compatibility if needed (empty implementation)
 export function initializeQuestionBank(): void { }
 
+export async function getQuestionPapers(): Promise<any[]> {
+  try {
+    const res = await fetch('/api/admin/questions', {
+      method: 'POST', // Using POST to send action
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'get_papers' })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.papers || [];
+    }
+  } catch (e) {
+    console.error("Failed to fetch papers", e);
+  }
+  return [];
+}
+
+export async function saveQuestionPaper(paper: any): Promise<boolean> {
+  try {
+    await fetch('/api/admin/questions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'save_paper', paper })
+    });
+    return true;
+  } catch (e) {
+    console.error("Failed to save paper", e);
+    return false;
+  }
+}
+

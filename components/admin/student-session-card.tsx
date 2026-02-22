@@ -37,6 +37,8 @@ function getStatusColor(status: StudentSession["status"]) {
       return "bg-green-500/20 text-green-400 border-green-500/30"
     case "paused":
       return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30"
+    case "pending": // Handle pending
+      return "bg-zinc-500/20 text-zinc-400 border-zinc-500/30"
     case "completed":
       return "bg-blue-500/20 text-blue-400 border-blue-500/30"
     case "terminated":
@@ -47,8 +49,10 @@ function getStatusColor(status: StudentSession["status"]) {
 }
 
 export function StudentSessionCard({ session, onViewDetails, onTerminate, onWatchLive, onWarn }: StudentSessionCardProps) {
-  const criticalFlags = session.behaviorFlags.filter((f) => f.severity === "critical" || f.severity === "high")
-  const progress = (session.answeredCount / session.totalQuestions) * 100
+  const criticalFlags = (session.behaviorFlags || []).filter((f) => f.severity === "critical" || f.severity === "high")
+  const progress = session.totalQuestions > 0 ? (session.answeredCount / session.totalQuestions) * 100 : 0
+  const timeRemaining = session.timeRemaining ?? 0
+
 
   return (
     <Card className="bg-card border-border hover:border-primary/50 transition-colors">
@@ -136,7 +140,7 @@ export function StudentSessionCard({ session, onViewDetails, onTerminate, onWatc
           <div className="flex justify-between text-sm">
             <span className="text-muted-foreground">Time Remaining</span>
             <span>
-              {Math.floor(session.timeRemaining / 60)}:{(session.timeRemaining % 60).toString().padStart(2, "0")}
+              {Math.floor(timeRemaining / 60)}:{(timeRemaining % 60).toString().padStart(2, "0")}
             </span>
           </div>
         </div>

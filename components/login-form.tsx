@@ -38,7 +38,7 @@ export function LoginForm() {
     const success = await login(studentId, password)
 
     if (success) {
-      router.push("/exam/setup")
+      router.push("/dashboard")
     } else {
       setError("Invalid Student ID or password. Try STU001 / password123")
     }

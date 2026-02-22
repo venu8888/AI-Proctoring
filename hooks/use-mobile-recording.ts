@@ -103,8 +103,12 @@ export function useMobileRecording(): UseMobileRecordingReturn {
 
           // Stream to backend
           try {
-            await fetch(`/api/recording/chunk?sessionId=${sessionId}&type=mobile`, {
+            await fetch(`/api/recording/chunk`, {
               method: 'POST',
+              headers: {
+                'x-session-id': sessionId,
+                'x-recording-type': 'mobile'
+              },
               body: event.data
             });
           } catch (e) {

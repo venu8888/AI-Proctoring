@@ -40,7 +40,7 @@ export default function ExamSetupPage() {
     requestScreenPermission,
     startRecording,
   } = useRecording()
-  const { isPaired } = usePairing()
+  const { isPaired, bypassMobile } = usePairing()
 
   const [webcamLoading, setWebcamLoading] = useState(false)
   const [screenLoading, setScreenLoading] = useState(false)
@@ -92,19 +92,17 @@ export default function ExamSetupPage() {
     // Start recording
     await startRecording()
 
-    // Fetch latest questions from server
-    let questions = sampleQuestions;
-    try {
-      const serverQuestions = await getQuestions();
-      if (serverQuestions && serverQuestions.length > 0) {
-        questions = serverQuestions;
-      }
-    } catch (e) {
-      console.error("Failed to load questions, using defaults", e);
+    // We pull the examId from query parameters
+    const urlParams = new URLSearchParams(window.location.search)
+    const examId = urlParams.get('examId')
+
+    if (!examId) {
+      console.error("Exam ID is missing from URL parameters.")
+      return;
     }
 
-    // Initialize exam with questions
-    initializeExam(questions, EXAM_CONFIG.duration)
+    // Initialize exam with examId
+    await initializeExam(examId)
 
     // Navigate to exam
     router.push("/exam")
@@ -197,6 +195,21 @@ export default function ExamSetupPage() {
             <div className="space-y-4">
               <h2 className="text-lg font-semibold">2. Pair Mobile Device</h2>
               <QRPairingSection />
+
+              {process.env.NODE_ENV !== 'production' && (
+                <div className="p-4 border border-yellow-500/50 bg-yellow-500/10 rounded-lg">
+                  <p className="text-sm font-medium text-yellow-500 mb-2">Development Mode</p>
+                  <Button
+                    variant="outline"
+                    className="w-full border-yellow-500/50 text-yellow-500 hover:bg-yellow-500/20"
+                    onClick={() => {
+                      bypassMobile()
+                    }}
+                  >
+                    [DEV] Bypass Mobile Pairing
+                  </Button>
+                </div>
+              )}
             </div>
 
             {/* Camera Preview */}

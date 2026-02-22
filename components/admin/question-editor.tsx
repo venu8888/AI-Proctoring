@@ -63,13 +63,14 @@ export function QuestionEditor() {
   }
 
   const handleAddNew = async () => {
-    const newQuestion: Question = {
+    const newQuestion: any = {
       questionId: `q${Date.now()}`,
       question: editForm.question || "",
       options: editForm.options || ["", "", "", ""],
       correctAnswer: editForm.correctAnswer || 0,
       difficulty: (editForm.difficulty as Difficulty) || "medium",
       minimumExpectedTime: editForm.minimumExpectedTime || 30,
+      topic: (editForm as any).topic || "General",
     }
 
     await addQuestion(newQuestion)
@@ -143,6 +144,7 @@ export function QuestionEditor() {
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2">
                       <span className="text-sm font-medium text-muted-foreground">Q{index + 1}</span>
+                      <Badge variant="outline">{(q as any).topic || "General"}</Badge>
                       <Badge className={difficultyColors[q.difficulty]}>{q.difficulty}</Badge>
                       <span className="text-xs text-muted-foreground">Min time: {q.minimumExpectedTime}s</span>
                     </div>
@@ -188,6 +190,15 @@ function QuestionForm({ form, setForm, onSave, onCancel, isNew }: QuestionFormPr
           onChange={(e) => setForm({ ...form, question: e.target.value })}
           placeholder="Enter the question..."
           rows={2}
+        />
+      </div>
+
+      <div>
+        <Label>Topic</Label>
+        <Input
+          value={(form as any).topic || ""}
+          onChange={(e) => setForm({ ...form, topic: e.target.value } as any)}
+          placeholder="e.g. Database, Data Structures, OOP"
         />
       </div>
 

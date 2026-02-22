@@ -24,7 +24,7 @@ export function ResultsPage({ onLogout }: ResultsPageProps) {
 
   if (!examState || !examLog) return null
 
-  const { questions, answers } = examState
+  const { questions, answers, finalResult } = examState
   const { totalCorrect, accuracy, behaviorFlags, examDuration } = examLog
 
   const formatDuration = (seconds: number) => {
@@ -33,7 +33,11 @@ export function ResultsPage({ onLogout }: ResultsPageProps) {
     return `${mins}m ${secs}s`
   }
 
-  const passed = accuracy >= 60 // 60% passing threshold
+  // Use the verified final backend result if available, otherwise fallback to local calculation
+  const passed = finalResult ? finalResult.passing : (accuracy >= 60)
+  const displayScore = finalResult ? (finalResult.score / questions.length) * 100 : accuracy
+  const displayCorrect = finalResult ? finalResult.score : totalCorrect
+  const credibilityIndex = finalResult ? finalResult.credibilityIndex : 100
 
   return (
     <div className="min-h-screen bg-background py-12">
@@ -52,49 +56,70 @@ export function ResultsPage({ onLogout }: ResultsPageProps) {
           <p className="mt-2 text-muted-foreground">Thank you for completing the examination, {student?.name}</p>
         </div>
 
-        {/* Score Card */}
-        <Card className="mb-6 border-border/50 bg-card/80">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Target className="h-5 w-5" />
-              Your Score
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="text-center">
-              <span className={cn("text-6xl font-bold", passed ? "text-success" : "text-destructive")}>
-                {accuracy.toFixed(1)}%
-              </span>
-              <p className="mt-2 text-muted-foreground">
-                {totalCorrect} out of {questions.length} correct
+        {/* Score & Credibility Card */}
+        <div className="grid gap-6 md:grid-cols-2 mb-6">
+          <Card className="border-border/50 bg-card/80 flex flex-col justify-center">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Target className="h-5 w-5" />
+                Your Score
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="text-center">
+                <span className={cn("text-6xl font-bold", passed ? "text-success" : "text-destructive")}>
+                  {displayScore.toFixed(1)}%
+                </span>
+                <p className="mt-2 text-muted-foreground">
+                  {displayCorrect} out of {questions.length} correct
+                </p>
+              </div>
+
+              <Progress value={displayScore} className="h-3" />
+
+              <div className="grid grid-cols-2 gap-4 text-center">
+                <div className="rounded-lg bg-muted/50 p-4">
+                  <Timer className="mx-auto h-6 w-6 text-primary mb-2" />
+                  <p className="text-2xl font-bold text-foreground">{formatDuration(examDuration)}</p>
+                  <p className="text-xs text-muted-foreground">Duration</p>
+                </div>
+                <div className="rounded-lg bg-muted/50 p-4 flex flex-col justify-center">
+                  <Badge variant={passed ? "default" : "destructive"} className="w-full justify-center py-2 text-lg">
+                    {passed ? "PASSED" : "FAILED"}
+                  </Badge>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/50 bg-card/80">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CheckCircle className="h-5 w-5" />
+                AI Credibility Index
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6 text-center">
+              <div className="text-center mt-4">
+                <span className={cn(
+                  "text-6xl font-bold",
+                  credibilityIndex >= 80 ? "text-success" : credibilityIndex >= 50 ? "text-warning" : "text-destructive"
+                )}>
+                  {credibilityIndex}/100
+                </span>
+              </div>
+
+              <Progress
+                value={credibilityIndex}
+                className={cn("h-3", credibilityIndex >= 80 ? "[&>div]:bg-success" : credibilityIndex >= 50 ? "[&>div]:bg-warning" : "[&>div]:bg-destructive")}
+              />
+
+              <p className="text-sm text-muted-foreground">
+                Your credibility score is calculated by our AI engine based on audio, visual, and behavioral data recorded during the exam.
               </p>
-            </div>
-
-            <Progress value={accuracy} className="h-3" />
-
-            <div className="grid grid-cols-3 gap-4 text-center">
-              <div className="rounded-lg bg-muted/50 p-4">
-                <CheckCircle className="mx-auto h-6 w-6 text-success mb-2" />
-                <p className="text-2xl font-bold text-foreground">{totalCorrect}</p>
-                <p className="text-xs text-muted-foreground">Correct</p>
-              </div>
-              <div className="rounded-lg bg-muted/50 p-4">
-                <XCircle className="mx-auto h-6 w-6 text-destructive mb-2" />
-                <p className="text-2xl font-bold text-foreground">{questions.length - totalCorrect}</p>
-                <p className="text-xs text-muted-foreground">Incorrect</p>
-              </div>
-              <div className="rounded-lg bg-muted/50 p-4">
-                <Timer className="mx-auto h-6 w-6 text-primary mb-2" />
-                <p className="text-2xl font-bold text-foreground">{formatDuration(examDuration)}</p>
-                <p className="text-xs text-muted-foreground">Duration</p>
-              </div>
-            </div>
-
-            <Badge variant={passed ? "default" : "destructive"} className="w-full justify-center py-2 text-lg">
-              {passed ? "PASSED" : "FAILED"}
-            </Badge>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
 
         {/* Behavior Flags */}
         {behaviorFlags.length > 0 && (

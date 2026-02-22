@@ -38,36 +38,7 @@ function MobileProctorContent() {
 
   useEffect(() => {
     if (!sessionId || step !== "active") return
-
-    // Initialize socket connection
-    import("@/lib/socket-client").then(({ socket }) => {
-      if (!socket.connected) socket.connect()
-
-      // Join session
-      socket.emit('mobile-join', { sessionId, deviceId, studentId: 'mobile' }) // studentId might be needed, assume passed or 'mobile'
-
-      const sendHeartbeat = () => {
-        socket.emit('mobile-heartbeat', { sessionId, deviceId })
-      }
-
-      // Initial heartbeat
-      sendHeartbeat()
-      setIsConnected(true) // Assume connected if socket works
-
-      const heartbeatInterval = setInterval(sendHeartbeat, 5000)
-
-      socket.on('disconnect', () => setIsConnected(false))
-      socket.on('connect', () => setIsConnected(true))
-      socket.on('force-disconnect', () => {
-        // Handle remote termination if needed
-      })
-
-      return () => {
-        clearInterval(heartbeatInterval)
-        socket.off('disconnect')
-        socket.off('connect')
-      }
-    })
+    setIsConnected(true)
   }, [sessionId, step, deviceId])
 
   const handleRequestPermission = async () => {
@@ -83,13 +54,7 @@ function MobileProctorContent() {
     setIsConfirming(true)
 
     try {
-      // Use socket for real-time confirmation
-      import("@/lib/socket-client").then(({ socket }) => {
-        if (!socket.connected) socket.connect()
-
-        // Emit confirmation to server
-        socket.emit('mobile-camera-confirmed', { sessionId })
-      })
+      // Removed legacy socket confirmation
 
       // Backend API call for persistence (optional if server.js handles it, but good for redundancy)
       await fetch('/api/pairing', {

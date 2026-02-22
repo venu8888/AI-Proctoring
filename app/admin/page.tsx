@@ -9,11 +9,15 @@ import { LiveMonitorGrid } from "@/components/admin/live-monitor-grid"
 import { SessionDetailModal } from "@/components/admin/session-detail-modal"
 import { QuestionEditor } from "@/components/admin/question-editor"
 import { StudentManager } from "@/components/admin/student-manager"
+import { UserProvisioning } from "@/components/admin/user-provisioning"
+import { GroupManagement } from "@/components/admin/group-management"
+import { ExamBlueprintEditor } from "@/components/admin/exam-blueprint-editor"
 import { LiveVideoViewer } from "@/components/admin/live-video-viewer"
+import { AnalyticsDashboard } from "@/components/admin/analytics-dashboard"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getActiveSessions, toStudentSession } from "@/services/session-registry"
 import type { StudentSession } from "@/types"
-import { LayoutDashboard, FileQuestion, Activity, Users } from "lucide-react"
+import { LayoutDashboard, FileQuestion, Activity, Users, UserPlus, Component, FileEdit } from "lucide-react"
 
 export default function AdminDashboard() {
   const { isAuthenticated, user } = useAuth()
@@ -33,66 +37,7 @@ export default function AdminDashboard() {
     }
   }, [isAuthenticated, user, router])
 
-  // REAL-TIME SESSION MONITORING VIA SOCKET
-  useEffect(() => {
-    import("@/lib/socket-client").then(({ socket }) => {
-      if (!socket.connected) socket.connect()
-
-      socket.emit('admin-join')
-
-      const updateSessionsList = (backendSessions: any[]) => {
-        // Convert backend session data to UI format
-        // Assuming backend structure matches ActiveSessionData
-        const mapped = backendSessions.map(toStudentSession)
-        setSessions(mapped)
-
-        // Update watching session details if needed
-        setWatchingSession(prev => {
-          if (!prev) return null
-          const updated = mapped.find(s => s.sessionId === prev.sessionId)
-          return updated || prev
-        })
-      }
-
-      // Initial State
-      socket.on('init-state', (data: { sessions: any[] }) => {
-        updateSessionsList(data.sessions)
-      })
-
-      // Individual Updates (Optimized: update single item in array)
-      socket.on('session-updated', (updatedSession: any) => {
-        setSessions(prev => {
-          const idx = prev.findIndex(s => s.sessionId === updatedSession.sessionId)
-          const mapped = toStudentSession(updatedSession)
-          if (idx === -1) return [...prev, mapped]
-
-          const newSessions = [...prev]
-          newSessions[idx] = mapped
-
-          // Update watching session details if needed
-          setWatchingSession(w => {
-            if (w?.sessionId === mapped.sessionId) return mapped
-            return w
-          })
-
-          return newSessions
-        })
-      })
-
-      socket.on('student-added', (newSession: any) => {
-        setSessions(prev => {
-          if (prev.find(s => s.sessionId === newSession.sessionId)) return prev
-          return [...prev, toStudentSession(newSession)]
-        })
-      })
-
-      return () => {
-        socket.off('init-state')
-        socket.off('session-updated')
-        socket.off('student-added')
-      }
-    })
-  }, [])
+  // Removed Socket.io real-time monitoring. Will be replaced by Supabase Realtime in Phase 3.
 
   const handleViewDetails = (session: StudentSession) => {
     setSelectedSession(session)
@@ -104,17 +49,12 @@ export default function AdminDashboard() {
   }, [])
 
   const handleTerminate = (sessionId: string) => {
-    import("@/lib/socket-client").then(({ socket }) => {
-      socket.emit('admin-terminate', { sessionId, reason: 'Terminated by Admin' })
-    })
     // Optimistic update
     setSessions(prev => prev.map(s => s.sessionId === sessionId ? { ...s, status: 'terminated' } : s))
   }
 
   const handleWarn = async (sessionId: string, message: string) => {
-    import("@/lib/socket-client").then(({ socket }) => {
-      socket.emit('admin-warning', { sessionId, message })
-    })
+    console.log("Warn student", sessionId, message)
   }
 
   if (!isAuthenticated || user?.role !== "admin") {
@@ -144,6 +84,18 @@ export default function AdminDashboard() {
               <Users className="h-4 w-4" />
               Students
             </TabsTrigger>
+            <TabsTrigger value="groups" className="gap-2">
+              <Component className="h-4 w-4" />
+              Groups
+            </TabsTrigger>
+            <TabsTrigger value="exams" className="gap-2">
+              <FileEdit className="h-4 w-4" />
+              Exams
+            </TabsTrigger>
+            <TabsTrigger value="users" className="gap-2">
+              <UserPlus className="h-4 w-4" />
+              Add Users
+            </TabsTrigger>
             <TabsTrigger value="questions" className="gap-2">
               <FileQuestion className="h-4 w-4" />
               Questions
@@ -169,18 +121,26 @@ export default function AdminDashboard() {
             <StudentManager />
           </TabsContent>
 
+          <TabsContent value="users">
+            <div className="flex justify-center pt-8">
+              <UserProvisioning />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="groups">
+            <GroupManagement />
+          </TabsContent>
+
+          <TabsContent value="exams">
+            <ExamBlueprintEditor />
+          </TabsContent>
+
           <TabsContent value="questions">
             <QuestionEditor />
           </TabsContent>
 
           <TabsContent value="analytics">
-            <div className="rounded-lg border border-border p-8 text-center">
-              <Activity className="h-12 w-12 text-muted-foreground/50 mx-auto mb-4" />
-              <h3 className="text-lg font-medium mb-2">Analytics Coming Soon</h3>
-              <p className="text-muted-foreground">
-                Detailed exam analytics and behavior reports will be available here.
-              </p>
-            </div>
+            <AnalyticsDashboard />
           </TabsContent>
         </Tabs>
       </main>

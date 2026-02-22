@@ -22,7 +22,7 @@ interface ExamContextType {
   examState: ExamState | null
   examLog: ExamLog | null
   isExamActive: boolean
-  initializeExam: (questions: Question[], durationMinutes: number) => void
+  initializeExam: (examId: string) => Promise<void>
   selectAnswer: (questionId: string, optionIndex: number) => void
   navigateToQuestion: (index: number) => void
   submitExam: () => void
@@ -40,7 +40,7 @@ interface ExamProviderProps {
 }
 
 export function ExamProvider({ children }: ExamProviderProps) {
-  const { session, student, updateSession } = useAuth()
+  const { session, student, updateSession, user } = useAuth()
   const { isPaired, pairingState } = usePairing()
   const { hasWebcamPermission, hasScreenPermission } = useRecording()
   const [examState, setExamState] = useState<ExamState | null>(null)
@@ -77,66 +77,84 @@ export function ExamProvider({ children }: ExamProviderProps) {
 
   // Initialize exam with questions and duration
   const initializeExam = useCallback(
-    (questions: Question[], durationMinutes: number) => {
-      const now = new Date()
-      const answers: Answer[] = questions.map((q) => ({
-        questionId: q.questionId,
-        selectedOption: null,
-        timeSpent: 0,
-        answeredAt: null,
-        isLocked: false,
-      }))
-
-      const newExamState: ExamState = {
-        questions,
-        answers,
-        currentQuestionIndex: 0,
-        startTime: now,
-        endTime: null,
-        totalDuration: durationMinutes * 60,
-        remainingTime: durationMinutes * 60,
-        isSubmitted: false,
-      }
-
-      const newExamLog: ExamLog = {
-        sessionId: session?.sessionId || "",
-        studentId: session?.studentId || "",
-        questionLogs: [],
-        behaviorFlags: [],
-        totalCorrect: 0,
-        totalQuestions: questions.length,
-        accuracy: 0,
-        examDuration: 0,
-        startTime: now,
-        endTime: null,
-      }
-
-      setExamState(newExamState)
-      setExamLog(newExamLog)
-      setQuestionStartTime(now)
-
-      if (session) {
-        updateSession({ status: "active", startTime: now })
-
-        registerSession({
-          sessionId: session.sessionId,
-          studentId: session.studentId,
-          studentName: student?.name || "Unknown",
-          examId: "exam-001",
-          startTime: now.getTime(),
-          totalDuration: durationMinutes * 60,
-          totalQuestions: questions.length,
-          currentQuestion: 1,
-          answeredCount: 0,
-          webcamActive: true,
-          screenShareActive: true,
-          mobileConnected: isPaired,
-          behaviorFlags: [],
-          activityLog: [{ action: "Started exam", timestamp: now.getTime() }],
+    async (examId: string) => {
+      // Rather than passing questions, we fetch them dynamically from the blueprint
+      try {
+        const res = await fetch('/api/student/exam', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'start', examId, studentId: user?.id, sessionId: session?.sessionId })
         })
+        const data = await res.json()
+
+        if (!data.success) throw new Error(data.error)
+
+        const questions = data.questions;
+        const durationMinutes = data.examDetails.durationMinutes
+
+        const now = new Date()
+        const answers: Answer[] = questions.map((q: any) => ({
+          questionId: q.questionId,
+          selectedOption: null,
+          timeSpent: 0,
+          answeredAt: null,
+          isLocked: false,
+        }))
+
+        const newExamState: ExamState = {
+          examId, // Add this to track the current exam DB ID
+          questions,
+          answers,
+          currentQuestionIndex: 0,
+          startTime: now,
+          endTime: null,
+          totalDuration: durationMinutes * 60,
+          remainingTime: durationMinutes * 60,
+          isSubmitted: false,
+        }
+
+        const newExamLog: ExamLog = {
+          sessionId: session?.sessionId || "",
+          studentId: session?.studentId || "",
+          questionLogs: [],
+          behaviorFlags: [],
+          totalCorrect: 0,
+          totalQuestions: questions.length,
+          accuracy: 0,
+          examDuration: 0,
+          startTime: now,
+          endTime: null,
+        }
+
+        setExamState(newExamState as any)
+        setExamLog(newExamLog)
+        setQuestionStartTime(now)
+
+        if (session) {
+          updateSession({ status: "active", startTime: now })
+
+          registerSession({
+            sessionId: session.sessionId,
+            studentId: session.studentId,
+            studentName: student?.name || "Unknown",
+            examId,
+            startTime: now.getTime(),
+            totalDuration: durationMinutes * 60,
+            totalQuestions: questions.length,
+            currentQuestion: 1,
+            answeredCount: 0,
+            webcamActive: true,
+            screenShareActive: true,
+            mobileConnected: isPaired,
+            behaviorFlags: [],
+            activityLog: [{ action: "Started exam", timestamp: now.getTime() }],
+          })
+        }
+      } catch (error) {
+        console.error("Failed to start exam via API", error)
       }
     },
-    [session, student, updateSession, isPaired],
+    [session, student, updateSession, isPaired, user],
   )
 
   // Select an answer for a question
@@ -168,10 +186,20 @@ export function ExamProvider({ children }: ExamProviderProps) {
           addActivityLog(session.sessionId, `Answered Q${answerIndex + 1}`)
         }
 
+        // Fire and forget autosave to database
+        const examId = (prev as any).examId;
+        if (examId && user?.id) {
+          fetch('/api/student/exam', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'autosave', examId, studentId: user.id, answers: newAnswers })
+          }).catch(console.error)
+        }
+
         return { ...prev, answers: newAnswers }
       })
     },
-    [questionStartTime, session],
+    [questionStartTime, session, user],
   )
 
   // Navigate to a specific question
@@ -258,63 +286,95 @@ export function ExamProvider({ children }: ExamProviderProps) {
   }, [])
 
   // Submit the exam
-  const submitExam = useCallback(() => {
-    setExamState((prev) => {
-      if (!prev || prev.isSubmitted) return prev
+  const submitExam = useCallback(async () => {
+    if (!examState || examState.isSubmitted) return
 
-      const endTime = new Date()
-      const startTimeMs = prev.startTime && prev.startTime instanceof Date ? prev.startTime.getTime() : 0
-      const examDuration = Math.floor((endTime.getTime() - startTimeMs) / 1000)
+    const endTime = new Date()
+    const startTimeMs = examState.startTime && examState.startTime instanceof Date ? examState.startTime.getTime() : 0
+    const examDuration = Math.floor((endTime.getTime() - startTimeMs) / 1000)
 
-      let totalCorrect = 0
-      const questionLogs: QuestionLog[] = prev.questions.map((q, index) => {
-        const answer = prev.answers[index]
-        const isCorrect = answer.selectedOption === q.correctAnswer
-        if (isCorrect) totalCorrect++
+    let totalCorrect = 0
+    const questionLogs: QuestionLog[] = examState.questions.map((q, index) => {
+      const answer = examState.answers[index]
+      const isCorrect = answer.selectedOption === q.correctAnswer
+      if (isCorrect) totalCorrect++
 
-        return {
-          questionId: q.questionId,
-          difficulty: q.difficulty,
-          timeSpent: answer.timeSpent,
-          isCorrect,
-          answeredBelowMinTime: answer.timeSpent < q.minimumExpectedTime,
-          timestamp: answer.answeredAt || endTime,
-        }
-      })
-
-      const behaviorFlags = analyzeBehavior(prev)
-
-      setExamLog((log) => {
-        if (!log) return null
-        return {
-          ...log,
-          questionLogs,
-          behaviorFlags: [...log.behaviorFlags, ...behaviorFlags],
-          totalCorrect,
-          accuracy: (totalCorrect / prev.questions.length) * 100,
-          examDuration,
-          endTime,
-        }
-      })
-
-      if (session) {
-        updateSession({
-          status: behaviorFlags.some((f) => f.severity === "high") ? "flagged" : "completed",
-          endTime,
-        })
-
-        completeSession(session.sessionId)
-        addActivityLog(session.sessionId, "Completed exam")
+      return {
+        questionId: q.questionId,
+        difficulty: q.difficulty,
+        timeSpent: answer.timeSpent,
+        isCorrect,
+        answeredBelowMinTime: answer.timeSpent < q.minimumExpectedTime,
+        timestamp: answer.answeredAt || endTime,
       }
+    })
 
+    const behaviorFlags = analyzeBehavior(examState)
+
+    setExamLog((log) => {
+      if (!log) return null
+      return {
+        ...log,
+        questionLogs,
+        behaviorFlags: [...log.behaviorFlags, ...behaviorFlags],
+        totalCorrect,
+        accuracy: (totalCorrect / examState.questions.length) * 100,
+        examDuration,
+        endTime,
+      }
+    })
+
+    if (session) {
+      updateSession({
+        status: behaviorFlags.some((f) => f.severity === "high") ? "flagged" : "completed",
+        endTime,
+      })
+
+      completeSession(session.sessionId)
+      addActivityLog(session.sessionId, "Completed exam")
+    }
+
+    // Final API submission to trigger auto-grading on backend
+    let finalResultData = undefined;
+    const examId = (examState as any).examId;
+    const finalBehaviorFlags = examLog ? [...examLog.behaviorFlags, ...behaviorFlags] : behaviorFlags
+
+    if (examId && user?.id) {
+      try {
+        const res = await fetch('/api/student/exam', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'submit',
+            examId,
+            studentId: user.id,
+            answers: examState.answers,
+            behaviorFlags: finalBehaviorFlags
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.grading) {
+            finalResultData = data.grading;
+          }
+        }
+      } catch (error) {
+        console.error("Failed to submit and grade exam", error)
+      }
+    }
+
+    setExamState((prev) => {
+      if (!prev) return null;
       return {
         ...prev,
         endTime,
         isSubmitted: true,
         remainingTime: 0,
+        finalResult: finalResultData
       }
     })
-  }, [analyzeBehavior, session, updateSession])
+  }, [examState, analyzeBehavior, session, updateSession, user, completeSession, addActivityLog])
 
   // Update questions dynamically
   const updateQuestions = useCallback((newQuestions: Question[]) => {
@@ -360,81 +420,12 @@ export function ExamProvider({ children }: ExamProviderProps) {
     })
   }, [submitExam])
 
-  // Join exam session via socket
-  useEffect(() => {
-    if (!session?.sessionId || !examState) return
+  // Removed socket connection for student join
 
-    import("@/lib/socket-client").then(({ socket }) => {
-      if (!socket.connected) socket.connect()
-
-      socket.emit('student-join', {
-        sessionId: session.sessionId,
-        studentId: session.studentId,
-        studentName: student?.name || "Unknown",
-        examId: "exam-001"
-      })
-
-      socket.on('exam-terminated', (data: any) => {
-        if (!examState.isSubmitted) {
-          submitExam()
-          alert(`Your exam has been terminated. Reason: ${data.reason}`)
-        }
-      })
-
-      socket.on('warning-received', (data: any) => {
-        setStatusMessage(data.message)
-        // Auto-clear after 10 seconds?
-        setTimeout(() => setStatusMessage(null), 10000)
-      })
-
-      return () => {
-        socket.off('exam-terminated')
-        socket.off('warning-received')
-      }
-    })
-  }, [session?.sessionId, examState, student?.name, submitExam])
-
-  // Real-time exam start
-  useEffect(() => {
-    if (examState && session) {
-      import("@/lib/socket-client").then(({ socket }) => {
-        // Tell backend we started
-        socket.emit('exam-start', { sessionId: session.sessionId })
-      })
-    }
-  }, [session, examState ? 1 : 0]) // Run once when examState init
+  // Removed real-time socket emit for exam start
 
 
-  // Poll for admin commands (termination, warnings) - REPLACED BY SOCKET
-  // We keep the behavior sync but use socket instead of fetch
-  useEffect(() => {
-    if (!examState || !session || examState.isSubmitted) return
-
-    const hasRecentHeartbeat = pairingState.lastHeartbeat
-      ? Date.now() - (pairingState.lastHeartbeat instanceof Date
-        ? pairingState.lastHeartbeat.getTime()
-        : new Date(pairingState.lastHeartbeat).getTime()) < 10000
-      : false
-
-    // Send periodic updates to backend via socket - this serves as "heartbeat" and "status update"
-    const interval = setInterval(() => {
-      import("@/lib/socket-client").then(({ socket }) => {
-        socket.emit('student-update', {
-          sessionId: session.sessionId,
-          data: {
-            currentQuestion: examState.currentQuestionIndex + 1,
-            answeredCount: examState.answers.filter((a) => a.selectedOption !== null).length,
-            webcamActive: hasWebcamPermission,
-            screenShareActive: hasScreenPermission,
-            mobileConnected: isPaired && hasRecentHeartbeat,
-            behaviorFlags: examLog?.behaviorFlags || [],
-          }
-        })
-      })
-    }, 2000)
-
-    return () => clearInterval(interval)
-  }, [examState, session, isPaired, pairingState, hasWebcamPermission, hasScreenPermission, examLog])
+  // Removed socket based polling for student-update
 
   // Check for termination from poll result
   // This logic should be inside the effect, but we need to expose the message to UI

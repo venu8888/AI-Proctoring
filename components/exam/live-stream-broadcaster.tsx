@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react"
 import { useRecording } from "@/contexts/recording-context"
 import { useAuth } from "@/contexts/auth-context"
+import { supabase } from "@/lib/supabaseClient"
 
 export function LiveStreamBroadcaster() {
     const { session } = useAuth()
@@ -10,6 +11,8 @@ export function LiveStreamBroadcaster() {
 
     // Use a ref to access current streams in callbacks without triggering re-runs
     const streamsRef = useRef({ webcamStream: recordingState.webcamStream, screenStream: recordingState.screenStream })
+    const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
+    const channelRef = useRef<any>(null)
 
     useEffect(() => {
         streamsRef.current = {
@@ -21,76 +24,101 @@ export function LiveStreamBroadcaster() {
     useEffect(() => {
         if (!session?.sessionId) return
 
-        let pc: RTCPeerConnection | null = null
-        let socketInstance: any = null
+        // 1. Join a specific channel for this exam session
+        const roomName = `webrtc-${session.sessionId}`
+        const channel = supabase.channel(roomName)
 
-        const initSocket = async () => {
-            const { socket } = await import("@/lib/socket-client")
-            if (!socket.connected) socket.connect()
-            socketInstance = socket
+        channelRef.current = channel
 
-            socket.on('request-stream', async () => {
-                console.log("Broadcaster: Received request-stream")
+        // 2. Handle incoming WebRTC signaling messages from Admins
+        channel.on('broadcast', { event: 'webrtc-signal' }, async (payload) => {
+            const { target, sender, signal } = payload.payload
 
-                if (pc) {
-                    pc.close()
-                }
+            // Ignore messages not meant for the student broadcaster
+            if (target !== 'broadcaster') return
 
+            let pc = peerConnectionsRef.current.get(sender)
+
+            // Initialize PeerConnection if it doesn't exist
+            if (!pc) {
                 pc = new RTCPeerConnection({
-                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' }
+                    ]
                 })
 
-                // Add Tracks
-                // Priority: Screen (0), Webcam (1)
-                const { screenStream, webcamStream } = streamsRef.current
+                peerConnectionsRef.current.set(sender, pc)
 
-                if (screenStream) {
-                    screenStream.getTracks().forEach(track => {
-                        if (pc && screenStream) pc.addTrack(track, screenStream)
+                // Add local streams to the connection (Webcam + Screen)
+                const streams = streamsRef.current
+                if (streams.webcamStream) {
+                    streams.webcamStream.getTracks().forEach(track => {
+                        pc!.addTrack(track, streams.webcamStream!)
+                    })
+                }
+                if (streams.screenStream) {
+                    streams.screenStream.getTracks().forEach(track => {
+                        pc!.addTrack(track, streams.screenStream!)
                     })
                 }
 
-                if (webcamStream) {
-                    webcamStream.getTracks().forEach(track => {
-                        if (pc && webcamStream) pc.addTrack(track, webcamStream)
-                    })
-                }
-
+                // Send ICE candidates to the admin
                 pc.onicecandidate = (event) => {
                     if (event.candidate) {
-                        socket.emit('ice-candidate', {
-                            targetSessionId: session.sessionId,
-                            candidate: event.candidate
+                        channel.send({
+                            type: 'broadcast',
+                            event: 'webrtc-signal',
+                            payload: {
+                                target: sender,
+                                sender: 'broadcaster',
+                                signal: { type: 'candidate', candidate: event.candidate }
+                            }
                         })
                     }
                 }
+            }
 
-                const offer = await pc.createOffer()
-                await pc.setLocalDescription(offer)
+            // Process signaling data
+            try {
+                if (signal.type === 'offer') {
+                    await pc.setRemoteDescription(new RTCSessionDescription(signal.description))
+                    const answer = await pc.createAnswer()
+                    await pc.setLocalDescription(answer)
 
-                socket.emit('offer', {
-                    targetSessionId: session.sessionId,
-                    sdp: offer
-                })
+                    channel.send({
+                        type: 'broadcast',
+                        event: 'webrtc-signal',
+                        payload: {
+                            target: sender,
+                            sender: 'broadcaster',
+                            signal: { type: 'answer', description: pc.localDescription }
+                        }
+                    })
+                } else if (signal.type === 'candidate') {
+                    await pc.addIceCandidate(new RTCIceCandidate(signal.candidate))
+                } else if (signal.type === 'peer-disconnect') {
+                    pc.close()
+                    peerConnectionsRef.current.delete(sender)
+                }
+            } catch (err) {
+                console.error('WebRTC Error:', err)
+            }
+        })
 
-                socket.on('answer', async (data: any) => {
-                    if (pc) await pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
-                })
-
-                socket.on('ice-candidate', async (data: any) => {
-                    if (pc && data.candidate) await pc.addIceCandidate(new RTCIceCandidate(data.candidate))
-                })
-            })
-        }
-
-        initSocket()
+        channel.subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+                console.log(`LiveStreamBroadcaster subscribed to ${roomName}`)
+            }
+        })
 
         return () => {
-            if (pc) pc.close()
-            if (socketInstance) {
-                socketInstance.off('request-stream')
-                socketInstance.off('answer')
-                socketInstance.off('ice-candidate')
+            // Cleanup all peer connections and the channel
+            peerConnectionsRef.current.forEach(pc => pc.close())
+            peerConnectionsRef.current.clear()
+
+            if (channelRef.current) {
+                supabase.removeChannel(channelRef.current)
             }
         }
     }, [session?.sessionId])

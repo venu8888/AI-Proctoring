@@ -19,6 +19,7 @@ interface PairingContextType {
   resetPairing: () => void
   updateHeartbeat: () => void
   confirmMobileCamera: () => void
+  bypassMobile: () => void
 }
 
 const PairingContext = createContext<PairingContextType | undefined>(undefined)
@@ -38,61 +39,7 @@ export function PairingProvider({ children }: PairingProviderProps) {
   })
   const [qrData, setQrData] = useState<QRPairingData | null>(null)
 
-  useEffect(() => {
-    if (!session?.sessionId) return
-
-    // Connect socket
-    import("@/lib/socket-client").then(({ socket }) => {
-      if (!socket.connected) socket.connect()
-
-      const onPairingUpdate = (data: any) => {
-        console.log("Socket: Pairing update received", data)
-        // Handle pairing update from socket
-        if (data.status === 'connected' || data.isPaired) {
-          setPairingState(prev => {
-            const newState = {
-              ...prev,
-              isPaired: true,
-              deviceId: data.deviceId || prev.deviceId,
-              lastHeartbeat: data.lastHeartbeat ? new Date(data.lastHeartbeat).toISOString() : new Date().toISOString(),
-              status: data.status,
-              cameraConfirmed: data.cameraConfirmed !== undefined ? data.cameraConfirmed : prev.cameraConfirmed
-            }
-            // Force isPaired if camera is confirmed
-            if (newState.cameraConfirmed) newState.isPaired = true;
-            return newState;
-          })
-        } else if (data.status === 'disconnected') {
-          setPairingState(prev => ({ ...prev, isPaired: false }))
-        } else if (data.cameraConfirmed) {
-          console.log("Socket: Camera confirmed only")
-          setPairingState(prev => ({ ...prev, cameraConfirmed: true, isPaired: true }))
-        }
-      }
-
-      socket.on(`pairing-update`, onPairingUpdate)
-      socket.on(`mobile-status-update`, onPairingUpdate)
-
-      // Emit join AFTER registering listeners
-      if (session.sessionId) {
-        console.log("Socket: Joining student session", session.sessionId);
-        socket.emit('student-join', {
-          sessionId: session.sessionId,
-          studentId: session.studentId,
-          studentName: session.studentName || "Student",
-          examId: "exam-setup"
-        })
-      }
-
-      return () => {
-        socket.off(`pairing-update`, onPairingUpdate)
-        socket.off(`mobile-status-update`, onPairingUpdate)
-      }
-    })
-  }, [session?.sessionId])
-
-  // NOTE: Initial status check might still be useful via API if socket takes time to connect
-  // but for "Modify existing files" and "Use Socket.IO ONLY", I will rely on socket.
+  // Removed legacy socket connection for pairing update
 
 
   // Generate QR code data for mobile pairing
@@ -234,6 +181,36 @@ export function PairingProvider({ children }: PairingProviderProps) {
     resetPairing,
     updateHeartbeat,
     confirmMobileCamera,
+    bypassMobile: useCallback(() => {
+      const newState: MobilePairingState = {
+        isPaired: true,
+        deviceId: 'dev-bypass',
+        pairingCode: null,
+        lastHeartbeat: new Date().toISOString(),
+        cameraConfirmed: true,
+      }
+      setPairingState(newState)
+      if (session?.sessionId) {
+        // Mock server update if needed, or just rely on local state locally
+        fetch('/api/pairing', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: session.sessionId,
+            action: 'pair',
+            deviceId: 'dev-bypass'
+          })
+        }).catch(console.error)
+        fetch('/api/pairing', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: session.sessionId,
+            action: 'confirm_camera'
+          })
+        }).catch(console.error)
+      }
+    }, [session?.sessionId])
   }
 
   return <PairingContext.Provider value={value}>{children}</PairingContext.Provider>
